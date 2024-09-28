@@ -1,0 +1,203 @@
+﻿
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+
+#include "Particle.h"
+#include "Vector.h"
+#include <fstream>
+using namespace std;
+
+/*–ешение задачи N-тел методом Particle-Particle (пр¤мого интегрировани¤).
+моделируетс¤ трЄхмерное пространство,
+обезразмеривание осуществлено с соображением G = 1,
+уравнени¤ движени¤ решаютс¤ методом Ёйлера.
+используетс¤ симметрично-противоположна¤ матрица гравитационных взаимодействий force,
+благодар¤ которой количество необходимых вычислений уменьшаетс¤ в два раза,
+в соответствии с третьим законом Ќьютона (Fij = -Fji)*/
+
+/*Solution of N-body problem with Particle-Particle (direct sum) method.
+This program calculates in 3D space,
+with nondimensialization (G = 1),
+equations of motion are solved with Euler's method.
+Forces Fij and Fji are treated as equal with different signs, due to Newton's 3rd law. That halves the amount of calculations.*/
+
+
+Particle* InitializeNBodySystem(const string path, int& n);
+
+double Cube(double number);
+
+Vector Sum(Vector* sequence, int size);
+Vector Sum(Vector* sequence, int fisrt, int size);
+
+__global__ void calculateForce(Vector* force, Particle* particles, const size_t size)
+{
+	int row = blockIdx.y * blockDim.y + threadIdx.y;
+	int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (row < size && col < size && row < col)
+	{
+		/*Vector distance = particles[col].position - particles[row].position;
+		force[row * size + col] = distance * particles[row].mass * particles[col].mass / Cube(distance.Abs());
+		force[col * size + row] = -force[row * size + col];*/
+
+		double distanceX = particles[col].position.x - particles[row].position.x;
+		double distanceY = particles[col].position.y - particles[row].position.y;
+		double distanceZ = particles[col].position.z - particles[row].position.z;
+
+		force[row * size + col].x = particles[row].mass * particles[col].mass / (distanceX * distanceX);
+		force[row * size + col].y = particles[row].mass * particles[col].mass / (distanceX * distanceY);
+		force[row * size + col].z = particles[row].mass * particles[col].mass / (distanceX * distanceZ);
+
+		force[row * size + col].x = -force[row * size + col].x;
+		force[row * size + col].y = -force[row * size + col].y;
+		force[row * size + col].z = -force[row * size + col].z;
+	}
+}
+
+int main()
+{
+	ofstream fileCoordinates;
+	fileCoordinates.open("Coordinates.txt");
+
+	int n;
+	double timeStep = 0.01;
+
+
+	Particle* particles = InitializeNBodySystem("Particles.txt", n);
+
+	Vector* force = new Vector[n * n];
+
+	const size_t sizeForceBytes = n * n * sizeof(Vector);
+	const size_t sizeParticlesBytes = n * sizeof(Particle);
+
+	Particle* particlesDevice;
+	Vector* forceDevice;
+
+	cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
+	cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&forceDevice, sizeForceBytes);
+
+	const int blockSize = 512;
+
+	dim3 dimBlock(blockSize, blockSize);
+	dim3 dimGrid(n / blockSize + 1, n / blockSize + 1);
+	
+
+	double time = 0.0;
+	for (;;)
+	{
+		cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
+		cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
+
+		cudaMalloc((void**)&forceDevice, sizeForceBytes);
+
+
+		fileCoordinates << "Moment: " << time << endl;
+
+
+		for (int i = 0; i < n; ++i)
+		{
+			force[i * n + i].SetZeroVector();
+		}
+
+		calculateForce <<<dimGrid, dimBlock >>> (forceDevice, particlesDevice, n);
+
+
+		for (int i = 0; i < n; ++i)
+		{
+			fileCoordinates << "Position of " << i << ": ";
+			fileCoordinates << particles[i].position << endl;
+
+			particles[i].acceleration = Sum(force, i, n) / particles[i].mass;
+
+			particles[i].velocity = particles[i].velocity + particles[i].acceleration * timeStep;
+
+			particles[i].position = particles[i].position + particles[i].velocity * timeStep;
+		}
+		fileCoordinates << endl;
+		fileCoordinates << endl;
+		fileCoordinates << endl;
+		fileCoordinates << endl;
+
+		time += timeStep;
+
+		cudaFree(particlesDevice);
+		cudaFree(forceDevice);
+
+		cudaDeviceSynchronize();
+	}
+
+
+	delete[] force;
+	delete[] particles;
+	fileCoordinates.close();
+	return 0;
+}
+
+Particle* InitializeNBodySystem(const string path, int& n)
+{
+	ifstream fileParticles;
+	fileParticles.open(path);
+
+	char tempString[256];
+	fileParticles.getline(tempString, 256, ':');
+
+	fileParticles >> n;
+	Particle* particles = new Particle[n];
+
+	fileParticles.get();
+	fileParticles.get();
+
+	fileParticles.getline(tempString, 256);
+
+	for (int i = 0; i < n; ++i)
+	{
+		fileParticles >> particles[i].mass;
+		fileParticles.get();
+		fileParticles >> particles[i].velocity.x >> particles[i].velocity.y >> particles[i].velocity.z;
+		fileParticles.get();
+		fileParticles >> particles[i].position.x >> particles[i].position.y >> particles[i].position.z;
+	}
+
+	fileParticles.close();
+	return particles;
+}
+
+double Cube(double number)
+{
+	return number * number * number;
+}
+
+Vector Sum(Vector* sequence, int size)
+{
+	Vector sum;
+	sum.x = .0;
+	sum.y = .0;
+	sum.z = .0;
+
+	for (int i = 0; i < size; ++i)
+	{
+		sum = sum + sequence[i];
+	}
+
+	return sum;
+}
+
+Vector Sum(Vector* sequence, int first, int size)
+{
+	Vector sum;
+	sum.x = .0;
+	sum.y = .0;
+	sum.z = .0;
+
+	for (int i = first; i < size; ++i)
+	{
+		sum = sum + sequence[i];
+	}
+
+	return sum;
+}
+
