@@ -60,7 +60,7 @@ struct Vector
 
 	friend std::ofstream& operator<<(std::ofstream& file, const Vector& vector)
 	{
-		file << vector.x << " " << vector.y << "" << vector.z;
+		file << vector.x << "  " << vector.y << "  " << vector.z;
 		return file;
 	}
 

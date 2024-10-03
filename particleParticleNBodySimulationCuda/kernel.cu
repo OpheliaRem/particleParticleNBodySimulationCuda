@@ -46,9 +46,9 @@ __global__ void calculateForce(Vector* force, Particle* particles, const size_t 
 		force[row * size + col].y = particles[row].mass * particles[col].mass / (distanceX * distanceY);
 		force[row * size + col].z = particles[row].mass * particles[col].mass / (distanceX * distanceZ);
 
-		force[row * size + col].x = -force[row * size + col].x;
-		force[row * size + col].y = -force[row * size + col].y;
-		force[row * size + col].z = -force[row * size + col].z;
+		force[col * size + row].x = -force[row * size + col].x;
+		force[col * size + row].y = -force[row * size + col].y;
+		force[col * size + row].z = -force[row * size + col].z;
 	}
 }
 
@@ -118,7 +118,7 @@ int main()
 			force[i * n + i].SetZeroVector();
 		}
 
-		calculateForce <<<dimGrid, dimBlock >>> (forceDevice, particlesDevice, n);
+		calculateForce <<<dimGrid, dimBlock>>> (forceDevice, particlesDevice, n);
 		cudaStatus = cudaGetLastError();
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
