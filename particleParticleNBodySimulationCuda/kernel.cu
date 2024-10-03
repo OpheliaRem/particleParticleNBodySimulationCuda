@@ -9,11 +9,11 @@
 #include <fstream>
 using namespace std;
 
-/*–ешение задачи N-тел методом Particle-Particle (пр¤мого интегрировани¤).
-моделируетс¤ трЄхмерное пространство,
+/*Решение задачи N - тел методом Particle - Particle(пр¤мого интегрировани¤).
+моделируетс¤ трёхмерное пространство,
 обезразмеривание осуществлено с соображением G = 1,
-уравнени¤ движени¤ решаютс¤ методом Ёйлера.
-используетс¤ симметрично-противоположна¤ матрица гравитационных взаимодействий force,
+уравнения движения решаются методом Эйлера.
+используется симметрично-противоположна¤ матрица гравитационных взаимодействий force,
 благодар¤ которой количество необходимых вычислений уменьшаетс¤ в два раза,
 в соответствии с третьим законом Ќьютона (Fij = -Fji)*/
 
@@ -38,10 +38,6 @@ __global__ void calculateForce(Vector* force, Particle* particles, const size_t 
 
 	if (row < size && col < size && row < col)
 	{
-		/*Vector distance = particles[col].position - particles[row].position;
-		force[row * size + col] = distance * particles[row].mass * particles[col].mass / Cube(distance.Abs());
-		force[col * size + row] = -force[row * size + col];*/
-
 		double distanceX = particles[col].position.x - particles[row].position.x;
 		double distanceY = particles[col].position.y - particles[row].position.y;
 		double distanceZ = particles[col].position.z - particles[row].position.z;
@@ -58,6 +54,12 @@ __global__ void calculateForce(Vector* force, Particle* particles, const size_t 
 
 int main()
 {
+	cudaError_t cudaStatus = cudaSetDevice(0);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+		return 1;
+	}
+
 	ofstream fileCoordinates;
 	fileCoordinates.open("Coordinates.txt");
 
@@ -75,12 +77,7 @@ int main()
 	Particle* particlesDevice;
 	Vector* forceDevice;
 
-	cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
-	cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
-
-	cudaMalloc((void**)&forceDevice, sizeForceBytes);
-
-	const int blockSize = 512;
+	const int blockSize = 32;
 
 	dim3 dimBlock(blockSize, blockSize);
 	dim3 dimGrid(n / blockSize + 1, n / blockSize + 1);
@@ -89,10 +86,28 @@ int main()
 	double time = 0.0;
 	for (;;)
 	{
-		cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
+		/*cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
 		cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
 
-		cudaMalloc((void**)&forceDevice, sizeForceBytes);
+		cudaMalloc((void**)&forceDevice, sizeForceBytes);*/
+
+		cudaStatus = cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+			return 1;
+		}
+
+		cudaStatus = cudaMalloc((void**)&forceDevice, sizeForceBytes);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+			return 1;
+		}
+
+		cudaStatus = cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
 
 
 		fileCoordinates << "Moment: " << time << endl;
@@ -104,6 +119,24 @@ int main()
 		}
 
 		calculateForce <<<dimGrid, dimBlock >>> (forceDevice, particlesDevice, n);
+		cudaStatus = cudaGetLastError();
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+			return -1;
+		}
+
+		cudaStatus = cudaDeviceSynchronize();
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+			return 1;
+		}
+
+		cudaStatus = cudaMemcpy(force, forceDevice, sizeForceBytes, cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+
 
 
 		for (int i = 0; i < n; ++i)
@@ -126,8 +159,6 @@ int main()
 
 		cudaFree(particlesDevice);
 		cudaFree(forceDevice);
-
-		cudaDeviceSynchronize();
 	}
 
 
