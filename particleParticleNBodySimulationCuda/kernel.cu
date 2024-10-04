@@ -29,7 +29,7 @@ Particle* InitializeNBodySystem(const string path, int& n);
 double Cube(double number);
 
 Vector Sum(Vector* sequence, int size);
-Vector Sum(Vector* sequence, int fisrt, int size);
+Vector Sum(Vector* sequence, int first, int size);
 
 __global__ void calculateForce(Vector* force, Particle* particles, const size_t size)
 {
@@ -42,14 +42,39 @@ __global__ void calculateForce(Vector* force, Particle* particles, const size_t 
 		double distanceY = particles[col].position.y - particles[row].position.y;
 		double distanceZ = particles[col].position.z - particles[row].position.z;
 
-		force[row * size + col].x = particles[row].mass * particles[col].mass / (distanceX * distanceX);
-		force[row * size + col].y = particles[row].mass * particles[col].mass / (distanceX * distanceY);
-		force[row * size + col].z = particles[row].mass * particles[col].mass / (distanceX * distanceZ);
+		double denominator = sqrt(distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ);
+
+		force[row * size + col].x = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
+		force[row * size + col].y = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
+		force[row * size + col].z = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
 
 		force[col * size + row].x = -force[row * size + col].x;
 		force[col * size + row].y = -force[row * size + col].y;
 		force[col * size + row].z = -force[row * size + col].z;
 	}
+}
+
+void calculateForce(Vector* force, Particle* particles, const size_t size, int i, int j)
+{
+	if (i < size && j < size && i < j)
+	{
+		//Vector distance = particles[j].position - particles[i].position;
+		double distanceX = particles[j].position.x - particles[i].position.x;
+		double distanceY = particles[j].position.y - particles[i].position.y;
+		double distanceZ = particles[j].position.z - particles[i].position.z;
+		/*Vector distance;
+		distance.x = distanceX;
+		distance.y = distanceY;
+		distance.z = distanceZ;*/
+
+		//force[i * size + j] = distance * particles[i].mass * particles[j].mass / Cube(distance.Abs());
+		double denominator = sqrt(distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ);
+		force[i * size + j].x = distanceX * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
+		force[i * size + j].y = distanceY * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
+		force[i * size + j].z = distanceZ * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
+
+		force[j * size + i] = -force[i * size + j];
+	}		
 }
 
 int main()
@@ -86,11 +111,6 @@ int main()
 	double time = 0.0;
 	for (;;)
 	{
-		/*cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
-		cudaMemcpy(particlesDevice, particles, sizeParticlesBytes, cudaMemcpyHostToDevice);
-
-		cudaMalloc((void**)&forceDevice, sizeForceBytes);*/
-
 		cudaStatus = cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMalloc failed!");
