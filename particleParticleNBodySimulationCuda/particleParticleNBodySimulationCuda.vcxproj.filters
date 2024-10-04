@@ -13,4 +13,11 @@
       <Filter>Файлы ресурсов</Filter>
     </Text>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Particle.h" />
+    <ClInclude Include="Vector.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="particleParticleNBodySimulationCuda.rc" />
+  </ItemGroup>
 </Project>

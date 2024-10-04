@@ -7,7 +7,7 @@
 #include "Particle.h"
 #include "Vector.h"
 #include <fstream>
-using namespace std;
+#include <filesystem>
 
 /*Решение задачи N - тел методом Particle - Particle(пр¤мого интегрировани¤).
 моделируетс¤ трёхмерное пространство,
@@ -24,7 +24,7 @@ equations of motion are solved with Euler's method.
 Forces Fij and Fji are treated as equal with different signs, due to Newton's 3rd law. That halves the amount of calculations.*/
 
 
-Particle* InitializeNBodySystem(const string path, int& n);
+Particle* InitializeNBodySystem(const std::string path, int& n);
 
 double Cube(double number);
 
@@ -42,39 +42,17 @@ __global__ void calculateForce(Vector* force, Particle* particles, const size_t 
 		double distanceY = particles[col].position.y - particles[row].position.y;
 		double distanceZ = particles[col].position.z - particles[row].position.z;
 
-		double denominator = sqrt(distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ);
+		double vector = sqrt(distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ);
+		double denominator = vector * vector * vector;
 
-		force[row * size + col].x = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
-		force[row * size + col].y = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
-		force[row * size + col].z = particles[row].mass * particles[col].mass / (denominator * denominator * denominator);
+		force[row * size + col].x = distanceX * particles[row].mass * particles[col].mass / denominator;
+		force[row * size + col].y = distanceY * particles[row].mass * particles[col].mass / denominator;
+		force[row * size + col].z = distanceZ * particles[row].mass * particles[col].mass / denominator;
 
 		force[col * size + row].x = -force[row * size + col].x;
 		force[col * size + row].y = -force[row * size + col].y;
 		force[col * size + row].z = -force[row * size + col].z;
 	}
-}
-
-void calculateForce(Vector* force, Particle* particles, const size_t size, int i, int j)
-{
-	if (i < size && j < size && i < j)
-	{
-		//Vector distance = particles[j].position - particles[i].position;
-		double distanceX = particles[j].position.x - particles[i].position.x;
-		double distanceY = particles[j].position.y - particles[i].position.y;
-		double distanceZ = particles[j].position.z - particles[i].position.z;
-		/*Vector distance;
-		distance.x = distanceX;
-		distance.y = distanceY;
-		distance.z = distanceZ;*/
-
-		//force[i * size + j] = distance * particles[i].mass * particles[j].mass / Cube(distance.Abs());
-		double denominator = sqrt(distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ);
-		force[i * size + j].x = distanceX * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
-		force[i * size + j].y = distanceY * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
-		force[i * size + j].z = distanceZ * particles[i].mass * particles[j].mass / (denominator * denominator * denominator);
-
-		force[j * size + i] = -force[i * size + j];
-	}		
 }
 
 int main()
@@ -85,12 +63,8 @@ int main()
 		return 1;
 	}
 
-	ofstream fileCoordinates;
-	fileCoordinates.open("Coordinates.txt");
-
 	int n;
 	double timeStep = 0.01;
-
 
 	Particle* particles = InitializeNBodySystem("Particles.txt", n);
 
@@ -108,9 +82,26 @@ int main()
 	dim3 dimGrid(n / blockSize + 1, n / blockSize + 1);
 	
 
+	std::filesystem::path path = L"coordinates";
+	if (std::filesystem::exists(path))
+	{
+		std::filesystem::remove_all(path);
+	}
+
+	if (!std::filesystem::create_directory(path))
+	{
+		printf("Error making a directory\n");
+		return 1;
+	}
+
 	double time = 0.0;
 	for (;;)
 	{
+		std::ofstream fileCoordinates;
+		std::string timeStr = std::to_string(time);
+		fileCoordinates.open("coordinates\\" + timeStr + ".csv");
+		fileCoordinates << "x;y;z\n";
+
 		cudaStatus = cudaMalloc((void**)&particlesDevice, sizeParticlesBytes);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMalloc failed!");
@@ -128,9 +119,6 @@ int main()
 			fprintf(stderr, "cudaMemcpy failed!");
 			return 1;
 		}
-
-
-		fileCoordinates << "Moment: " << time << endl;
 
 
 		for (int i = 0; i < n; ++i)
@@ -161,36 +149,32 @@ int main()
 
 		for (int i = 0; i < n; ++i)
 		{
-			fileCoordinates << "Position of " << i << ": ";
-			fileCoordinates << particles[i].position << endl;
+			fileCoordinates << particles[i].position << "\n";
 
-			particles[i].acceleration = Sum(force, i, n) / particles[i].mass;
+			particles[i].acceleration = Sum(force, i * n, i * n + n) / particles[i].mass;
 
 			particles[i].velocity = particles[i].velocity + particles[i].acceleration * timeStep;
 
 			particles[i].position = particles[i].position + particles[i].velocity * timeStep;
 		}
-		fileCoordinates << endl;
-		fileCoordinates << endl;
-		fileCoordinates << endl;
-		fileCoordinates << endl;
 
 		time += timeStep;
 
 		cudaFree(particlesDevice);
 		cudaFree(forceDevice);
+
+		fileCoordinates.close();
 	}
 
 
 	delete[] force;
 	delete[] particles;
-	fileCoordinates.close();
 	return 0;
 }
 
-Particle* InitializeNBodySystem(const string path, int& n)
+Particle* InitializeNBodySystem(const std::string path, int& n)
 {
-	ifstream fileParticles;
+	std::ifstream fileParticles;
 	fileParticles.open(path);
 
 	char tempString[256];
@@ -237,14 +221,14 @@ Vector Sum(Vector* sequence, int size)
 	return sum;
 }
 
-Vector Sum(Vector* sequence, int first, int size)
+Vector Sum(Vector* sequence, int first, int last)
 {
 	Vector sum;
 	sum.x = .0;
 	sum.y = .0;
 	sum.z = .0;
 
-	for (int i = first; i < size; ++i)
+	for (int i = first; i < last; ++i)
 	{
 		sum = sum + sequence[i];
 	}
